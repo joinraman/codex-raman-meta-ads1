@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Meta Ads Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --card: #1a1d2e;
+      --row-alt: #1e2235;
+      --row-head: #13162a;
+      --blue: #3b82f6;
+      --green: #10b981;
+      --amber: #f59e0b;
+      --red: #ef4444;
+      --text: #e2e8f0;
+      --muted: #64748b;
+      --border: #2d3148;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      padding: 20px;
+    }
+    h1,h2 { margin: 0 0 14px; }
+    .section { margin-bottom: 20px; }
+    .card, .table-wrap, .chart-wrap {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px;
+    }
+    .kpis {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 12px;
+    }
+    .kpi .label { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+    .kpi .val { font-size: 22px; font-weight: 700; }
+    .chart-wrap { height: 280px; }
+    .tables-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { text-align: left; padding: 9px 8px; border-bottom: 1px solid var(--border); }
+    th { background: var(--row-head); color: var(--muted); font-weight: 600; }
+    tr:nth-child(even) td { background: var(--row-alt); }
+    tr.worst td { background: rgba(239, 68, 68, 0.12) !important; }
+    .right { text-align: right; }
+    .muted { color: var(--muted); }
+    .blue { color: var(--blue); }
+    .green { color: var(--green); }
+    .amber { color: var(--amber); }
+    .red { color: var(--red); }
+    @media (max-width: 900px) {
+      .kpis { grid-template-columns: repeat(2, 1fr); }
+      .tables-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 600px) {
+      .kpis { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="section">
+    <h1>Meta Ads Performance Dashboard</h1>
+    <p class="muted" id="dateRange"></p>
+  </div>
+
+  <div class="section kpis" id="kpiCards"></div>
+
+  <div class="section chart-wrap">
+    <h2>Daily Trend</h2>
+    <canvas id="trendChart"></canvas>
+  </div>
+
+  <div class="section table-wrap">
+    <h2>Campaign Breakdown</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Campaign</th><th class="right">Spend</th><th class="right">Purchases</th><th class="right">Revenue</th><th class="right">ROAS</th><th class="right">CPP</th>
+        </tr>
+      </thead>
+      <tbody id="campaignBody"></tbody>
+    </table>
+  </div>
+
+  <div class="section tables-grid">
+    <div class="table-wrap">
+      <h2>Top 5 Ads by ROAS</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Ad</th><th>Campaign</th><th class="right">Spend</th><th class="right">Purchases</th><th class="right">Revenue</th><th class="right">ROAS</th>
+          </tr>
+        </thead>
+        <tbody id="topAdsBody"></tbody>
+      </table>
+    </div>
+    <div class="table-wrap">
+      <h2>Bottom 5 Ads by Cost Per Purchase</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Ad</th><th>Campaign</th><th class="right">Spend</th><th class="right">Purchases</th><th class="right">CPP</th>
+          </tr>
+        </thead>
+        <tbody id="bottomAdsBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="section table-wrap">
+    <h2>Funnel by Campaign</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Campaign</th><th class="right">Impressions</th><th class="right">Clicks</th><th class="right">CTR%</th><th class="right">Add to Cart</th><th class="right">ATC Rate%</th><th class="right">Checkout</th><th class="right">Chk Rate%</th><th class="right">Purchases</th><th class="right">CVR%</th>
+        </tr>
+      </thead>
+      <tbody id="funnelBody"></tbody>
+    </table>
+  </div>
+
+  <script>
+const RAW_CSV = `campaign_name,spend,impressions,clicks,purchases,purchase_value,leads
+Prospecting - Video,520.50,80123,1920,34,2980,0
+Retargeting - DPA,310.00,30210,1260,42,4210,0
+Lead Magnet - Ebook,185.25,45000,880,0,0,75
+Creative Test - UGC,210.30,39880,740,8,620,0`;
+
+function parseCSV(raw) {
+  const lines = raw.trim().split('\n');
+  const out = [];
+  for (const line of lines) {
+    const row = [];
+    let field = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') {
+        if (inQuotes && line[i + 1] === '"') {
+          field += '"';
+          i++;
+        } else {
+          inQuotes = !inQuotes;
+        }
+      } else if (ch === ',' && !inQuotes) {
+        row.push(field);
+        field = '';
+      } else {
+        field += ch;
+      }
+    }
+    row.push(field);
+    out.push(row);
+  }
+  return out;
+}
+
+const n = (val) => parseFloat(val) || 0;
+const fmt = (v) => v.toLocaleString('en-GB', { style: 'currency', currency: 'GBP' });
+const fmtROAS = (v) => `${v.toFixed(2)}x`;
+const fmtPct = (v) => `${v.toFixed(1)}%`;
+const truncate = (str, max = 55) => str.length > max ? `${str.slice(0, max - 1)}…` : str;
+const shortCampaign = (name) => name.replace(/^RX - /, '').replace(/ - UK - M&F - Sales - CBO$/, '');
+
+const rows = parseCSV(RAW_CSV);
+const headers = rows[0].map(h => h.trim().toLowerCase());
+const idx = Object.fromEntries(headers.map((h, i) => [h, i]));
+
+const totals = { spend: 0, purchases: 0, revenue: 0 };
+const byDay = {};
+const byCampaign = {};
+const byAd = {};
+let minDate = null;
+let maxDate = null;
+
+for (let i = 1; i < rows.length; i++) {
+  const r = rows[i];
+  const campaignName = r[idx.campaign_name] || 'Unknown';
+  const adName = r[idx.ad_name] || 'N/A';
+  const date = r[idx.date] || 'N/A';
+  const spend = n(r[idx.spend]);
+  const purchases = n(r[idx.purchases]);
+  const revenue = n(r[idx.purchase_value]);
+  const impressions = n(r[idx.impressions]);
+  const clicks = n(r[idx.clicks]);
+  const atc = n(r[idx.add_to_cart] || r[idx.atc]);
+  const checkout = n(r[idx.initiate_checkout] || r[idx.checkout]);
+
+  totals.spend += spend;
+  totals.purchases += purchases;
+  totals.revenue += revenue;
+
+  if (!byDay[date]) byDay[date] = { spend: 0, revenue: 0 };
+  byDay[date].spend += spend;
+  byDay[date].revenue += revenue;
+
+  if (!byCampaign[campaignName]) byCampaign[campaignName] = {
+    spend: 0, purchases: 0, revenue: 0, impressions: 0, clicks: 0, atc: 0, checkout: 0
+  };
+  byCampaign[campaignName].spend += spend;
+  byCampaign[campaignName].purchases += purchases;
+  byCampaign[campaignName].revenue += revenue;
+  byCampaign[campaignName].impressions += impressions;
+  byCampaign[campaignName].clicks += clicks;
+  byCampaign[campaignName].atc += atc;
+  byCampaign[campaignName].checkout += checkout;
+
+  const adKey = `${adName}|||${campaignName}`;
+  if (!byAd[adKey]) byAd[adKey] = { adName, campaignName, spend: 0, purchases: 0, revenue: 0 };
+  byAd[adKey].spend += spend;
+  byAd[adKey].purchases += purchases;
+  byAd[adKey].revenue += revenue;
+
+  if (date !== 'N/A') {
+    const d = new Date(date);
+    if (!minDate || d < minDate) minDate = d;
+    if (!maxDate || d > maxDate) maxDate = d;
+  }
+}
+
+const roas = totals.spend ? totals.revenue / totals.spend : 0;
+const avgCpp = totals.purchases ? totals.spend / totals.purchases : 0;
+
+const cards = [
+  ['Total Spend', fmt(totals.spend), 'blue'],
+  ['Purchases', totals.purchases.toLocaleString(), 'amber'],
+  ['Revenue', fmt(totals.revenue), 'green'],
+  ['ROAS', fmtROAS(roas), 'green'],
+  ['Avg CPP', totals.purchases ? fmt(avgCpp) : '—', 'amber']
+];
+
+document.getElementById('kpiCards').innerHTML = cards.map(([label, val, color]) =>
+  `<div class="card kpi"><div class="label">${label}</div><div class="val ${color}">${val}</div></div>`
+).join('');
+
+if (minDate && maxDate) {
+  document.getElementById('dateRange').textContent = `${minDate.toLocaleDateString('en-GB')} - ${maxDate.toLocaleDateString('en-GB')}`;
+} else {
+  document.getElementById('dateRange').textContent = 'Date range unavailable in CSV.';
+}
+
+const dayLabels = Object.keys(byDay).sort();
+const daySpend = dayLabels.map(d => byDay[d].spend);
+const dayRevenue = dayLabels.map(d => byDay[d].revenue);
+new Chart(document.getElementById('trendChart'), {
+  type: 'line',
+  data: {
+    labels: dayLabels.map(d => d === 'N/A' ? d : new Date(d).toLocaleDateString('en-GB', {day:'2-digit', month:'short'})),
+    datasets: [
+      { label: 'Spend', data: daySpend, borderColor: '#3b82f6', tension: 0.25 },
+      { label: 'Revenue', data: dayRevenue, borderColor: '#10b981', tension: 0.25 }
+    ]
+  },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: { legend: { labels: { color: '#e2e8f0' } } },
+    scales: {
+      x: { ticks: { color: '#64748b' }, grid: { color: '#2d3148' } },
+      y: {
+        ticks: { color: '#64748b', callback: (v) => `£${v}` },
+        grid: { color: '#2d3148' }
+      }
+    }
+  }
+});
+
+const campaignRows = Object.entries(byCampaign)
+  .sort((a, b) => b[1].spend - a[1].spend)
+  .map(([campaign, v]) => {
+    const cRoas = v.spend ? v.revenue / v.spend : 0;
+    const cpp = v.purchases ? fmt(v.spend / v.purchases) : '—';
+    return `<tr>
+      <td>${shortCampaign(campaign)}</td>
+      <td class="right">${fmt(v.spend)}</td>
+      <td class="right">${v.purchases.toLocaleString()}</td>
+      <td class="right">${fmt(v.revenue)}</td>
+      <td class="right">${fmtROAS(cRoas)}</td>
+      <td class="right">${cpp}</td>
+    </tr>`;
+  }).join('');
+document.getElementById('campaignBody').innerHTML = campaignRows;
+
+const adList = Object.values(byAd);
+const topAds = adList
+  .filter(a => a.spend >= 10 && a.purchases >= 1)
+  .map(a => ({ ...a, roas: a.spend ? a.revenue / a.spend : 0 }))
+  .sort((a, b) => b.roas - a.roas)
+  .slice(0, 5);
+document.getElementById('topAdsBody').innerHTML = topAds.map(a => `<tr>
+  <td title="${a.adName}">${truncate(a.adName, 55)}</td>
+  <td>${shortCampaign(a.campaignName)}</td>
+  <td class="right">${fmt(a.spend)}</td>
+  <td class="right">${a.purchases.toLocaleString()}</td>
+  <td class="right">${fmt(a.revenue)}</td>
+  <td class="right">${fmtROAS(a.roas)}</td>
+</tr>`).join('');
+
+const bottomAds = adList
+  .filter(a => a.purchases >= 1)
+  .map(a => ({ ...a, cpp: a.spend / a.purchases }))
+  .sort((a, b) => b.cpp - a.cpp)
+  .slice(0, 5);
+document.getElementById('bottomAdsBody').innerHTML = bottomAds.map(a => `<tr class="worst">
+  <td title="${a.adName}">${truncate(a.adName, 55)}</td>
+  <td>${shortCampaign(a.campaignName)}</td>
+  <td class="right">${fmt(a.spend)}</td>
+  <td class="right">${a.purchases.toLocaleString()}</td>
+  <td class="right">${fmt(a.cpp)}</td>
+</tr>`).join('');
+
+const funnelRows = Object.entries(byCampaign).map(([campaign, v]) => {
+  const ctr = v.impressions ? (v.clicks / v.impressions) * 100 : null;
+  const atcRate = v.clicks ? (v.atc / v.clicks) * 100 : null;
+  const chkRate = v.atc ? (v.checkout / v.atc) * 100 : null;
+  const cvr = v.clicks ? (v.purchases / v.clicks) * 100 : null;
+  return `<tr>
+    <td>${shortCampaign(campaign)}</td>
+    <td class="right">${v.impressions.toLocaleString()}</td>
+    <td class="right">${v.clicks.toLocaleString()}</td>
+    <td class="right">${ctr === null ? '—' : fmtPct(ctr)}</td>
+    <td class="right">${v.atc.toLocaleString()}</td>
+    <td class="right">${atcRate === null ? '—' : fmtPct(atcRate)}</td>
+    <td class="right">${v.checkout.toLocaleString()}</td>
+    <td class="right">${chkRate === null ? '—' : fmtPct(chkRate)}</td>
+    <td class="right">${v.purchases.toLocaleString()}</td>
+    <td class="right">${cvr === null ? '—' : fmtPct(cvr)}</td>
+  </tr>`;
+}).join('');
+document.getElementById('funnelBody').innerHTML = funnelRows;
+  </script>
+</body>
+</html>
